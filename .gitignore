@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+# backend
+.venv
+*.pkl
+*.pickle
+*.sav
+*.h5
+*.pt
