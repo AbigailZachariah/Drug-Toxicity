@@ -13,9 +13,13 @@ dist
 dist-ssr
 *.local
 
-# Environment files
+# Environment files (root, frontend, and backend)
 .env
-.env.*        # ignore any other env variants like .env.development, .env.production
+.env.*                     # root env variants
+frontend/.env
+frontend/.env.*
+backend/.env
+backend/.env.*
 
 # Model files
 backend/model/rf_models.pkl
