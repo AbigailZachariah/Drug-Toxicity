@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { predictToxicity } from "../../api";        // ← ADD
 import "./LandingPage.css";
 
 const FEATURES = [
@@ -22,24 +23,27 @@ const FEATURES = [
 
 export default function LandingPage() {
   const [compound, setCompound] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
   const navigate = useNavigate();
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     if (!compound.trim()) return;
     setLoading(true);
-    setTimeout(() => {
+    setError("");
+    try {
+      const data = await predictToxicity(compound.trim()); // real API call
+      navigate("/results", { state: { compound: compound.trim(), data } });
+    } catch (e) {
+      setError(e.message);
       setLoading(false);
-      navigate("/results", { state: { compound } });
-    }, 3000);
+    }
   };
 
   return (
     <div className="lp-root">
-      {/* Background */}
       <div className="lp-bg" />
 
-      {/* Navbar */}
       <nav className="lp-nav">
         <div className="lp-nav-brand">
           <span className="lp-nav-icon">🧬</span>
@@ -47,7 +51,6 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* Hero */}
       <section className="lp-hero">
         <div className="lp-hero-content">
           <div className="lp-badge">AI-Powered Chemical Intelligence</div>
@@ -59,14 +62,13 @@ export default function LandingPage() {
             Harness AI to predict compound toxicity and environmental impact in seconds.
           </p>
 
-          {/* Input */}
           <div className="lp-input-wrap">
             <input
               className="lp-input"
               type="text"
-              placeholder="Enter compound name or formula… e.g. Benzene, H₂SO₄"
+              placeholder="Enter SMILES string… e.g. CCO, CC(=O)O"
               value={compound}
-              onChange={(e) => setCompound(e.target.value)}
+              onChange={(e) => { setCompound(e.target.value); setError(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
             />
             <button
@@ -84,42 +86,59 @@ export default function LandingPage() {
               )}
             </button>
           </div>
+
+          {error && (
+            <p style={{ color:"#ff4d4d", marginTop:"0.75rem", fontSize:"0.9rem" }}>
+              ⚠️ {error}
+            </p>
+          )}
+
+          {/* Quick example chips */}
+          <div style={{ marginTop:"1rem", display:"flex", gap:"0.5rem", flexWrap:"wrap" }}>
+            {[
+              { name:"Ethanol",  s:"CCO" },
+              { name:"Aspirin",  s:"CC(=O)Oc1ccccc1C(=O)O" },
+              { name:"Caffeine", s:"Cn1cnc2c1c(=O)n(C)c(=O)n2C" },
+            ].map(ex => (
+              <button key={ex.name}
+                onClick={() => { setCompound(ex.s); setError(""); }}
+                style={{
+                  background:"rgba(255,255,255,0.06)",
+                  border:"1px solid rgba(255,255,255,0.12)",
+                  borderRadius:"99px", padding:"0.3rem 0.8rem",
+                  color:"#94a3b8", fontSize:"0.8rem", cursor:"pointer"
+                }}>
+                {ex.name}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* Skeleton Dashboard Preview */}
       {loading && (
         <section className="lp-skeleton-section">
           <p className="lp-skeleton-label">Analyzing <strong>{compound}</strong>…</p>
           <div className="lp-skeleton-grid">
             <div className="lp-skeleton-card tall">
-              <div className="sk-line w60" />
-              <div className="sk-bar" />
-              <div className="sk-line w40" />
-              <div className="sk-line w80" />
+              <div className="sk-line w60" /><div className="sk-bar" />
+              <div className="sk-line w40" /><div className="sk-line w80" />
             </div>
             <div className="lp-skeleton-card">
-              <div className="sk-line w50" />
-              <div className="sk-circle" />
+              <div className="sk-line w50" /><div className="sk-circle" />
               <div className="sk-line w70" />
             </div>
             <div className="lp-skeleton-card">
-              <div className="sk-line w60" />
-              <div className="sk-line w90" />
-              <div className="sk-line w50" />
-              <div className="sk-badge" />
+              <div className="sk-line w60" /><div className="sk-line w90" />
+              <div className="sk-line w50" /><div className="sk-badge" />
             </div>
             <div className="lp-skeleton-card wide">
-              <div className="sk-line w30" />
-              <div className="sk-line w100" />
-              <div className="sk-line w80" />
-              <div className="sk-line w60" />
+              <div className="sk-line w30" /><div className="sk-line w100" />
+              <div className="sk-line w80" /><div className="sk-line w60" />
             </div>
           </div>
         </section>
       )}
 
-      {/* Feature Cards */}
       {!loading && (
         <section className="lp-features">
           {FEATURES.map((f, i) => (
@@ -132,7 +151,6 @@ export default function LandingPage() {
         </section>
       )}
 
-      {/* Footer */}
       <footer className="lp-footer">
         Copyright &copy; www.ToxiScan.com. All rights reserved.
       </footer>

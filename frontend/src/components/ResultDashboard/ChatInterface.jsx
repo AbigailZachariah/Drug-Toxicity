@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { sendChat } from "../../api";            // ← ADD
 
 const SUGGESTIONS = [
   "Is this compound safe to handle?",
@@ -7,14 +8,14 @@ const SUGGESTIONS = [
   "What safety measures are needed?",
 ];
 
-export default function ChatInterface({ compound = "" }) {
+export default function ChatInterface({ compound = "", context = {} }) {   // ← ADD context prop
   const [messages, setMessages] = useState([
     {
       role: "assistant",
       text: `Hi! I'm your ToxiScan assistant 🧬. Ask me anything about **${compound || "this compound"}**.`,
     },
   ]);
-  const [input, setInput] = useState("");
+  const [input,   setInput]   = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
@@ -22,24 +23,24 @@ export default function ChatInterface({ compound = "" }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const send = (text) => {
+  const send = async (text) => {
     const msg = text || input.trim();
     if (!msg) return;
     setInput("");
     setMessages((prev) => [...prev, { role: "user", text: msg }]);
     setLoading(true);
 
-    // Simulated AI reply — wire to your actual API here
-    setTimeout(() => {
+    try {
+      const { response } = await sendChat(msg, context);   // ← REAL API CALL
+      setMessages((prev) => [...prev, { role: "assistant", text: response }]);
+    } catch {
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          text: `Based on the analysis of **${compound}**: ${msg.endsWith("?") ? "That's a great question. The compound shows significant interactions in this area based on our model's predictions." : "Noted. Here's what the model says about that aspect of the compound."}`,
-        },
+        { role: "assistant", text: "Sorry, I couldn't connect to the server." },
       ]);
+    } finally {
       setLoading(false);
-    }, 1200);
+    }
   };
 
   return (
@@ -53,9 +54,7 @@ export default function ChatInterface({ compound = "" }) {
       <div className="chat-messages">
         {messages.map((m, i) => (
           <div key={i} className={`chat-msg chat-msg--${m.role}`}>
-            {m.role === "assistant" && (
-              <span className="chat-avatar">🧬</span>
-            )}
+            {m.role === "assistant" && <span className="chat-avatar">🧬</span>}
             <div className="chat-bubble">
               {m.text.split("**").map((chunk, j) =>
                 j % 2 === 1 ? <strong key={j}>{chunk}</strong> : chunk
