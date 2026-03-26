@@ -68,7 +68,7 @@ html,body{
 /* ---------- Hero ---------- */
 .lp-hero {
   width: 100%;
-  padding: 7rem 4rem 6rem;
+  padding: 7rem 4rem 4rem;
   display: flex;
   justify-content: center;
   align-items: center;
