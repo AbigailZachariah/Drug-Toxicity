@@ -131,8 +131,8 @@ toxiscan/
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/toxiscan.git
-cd toxiscan
+git clone https://github.com/Ar2005ya-12232005a/Drug_Toxicity
+cd Drug_Toxicity
 ```
 
 ### 2. Install Python dependencies
