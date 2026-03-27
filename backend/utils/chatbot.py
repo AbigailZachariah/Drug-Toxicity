@@ -2,7 +2,7 @@ import re
 import os
 from google import genai
 
-# ── Lazy Gemini initialization (reads key at call time, not import time) ──────
+# ── Lazy Gemini initialization ────────────────────────────────────────────────
 _client = None
 
 def _get_client():
@@ -16,7 +16,7 @@ def _get_client():
     return _client
 
 
-# ── Fallback rules (used when Gemini is unavailable) ─────────────────────────
+# ── Fallback rules ────────────────────────────────────────────────────────────
 RULES = {
     "smiles":        "SMILES is a text notation for molecular structures. Example: CCO = ethanol.",
     "morgan":        "Morgan fingerprints encode circular substructures into 2048 binary bits.",
@@ -37,25 +37,69 @@ RULES = {
 }
 
 
-# ── Build a rich context summary for Gemini ───────────────────────────────────
+# ── Build rich context summary ────────────────────────────────────────────────
 def _build_context_summary(context: dict) -> str:
     if not context:
         return "No prediction has been run yet."
 
-    toxic_targets = [(k, v) for k, v in context.items() if v.get("prediction") == 1]
-    safe_targets  = [(k, v) for k, v in context.items() if v.get("prediction") == 0]
-    highest       = max(context.items(), key=lambda x: x[1].get("probability", 0))
+    lines = []
 
-    lines = [
-        f"Total endpoints tested: {len(context)}",
-        (f"Toxic endpoints ({len(toxic_targets)}): " +
-            ", ".join(f"{k} ({v['probability']:.2f})" for k, v in toxic_targets))
-            if toxic_targets else "Toxic endpoints: None",
-        (f"Safe endpoints ({len(safe_targets)}): " +
-            ", ".join(k for k, _ in safe_targets))
-            if safe_targets else "Safe endpoints: None",
-        f"Highest risk: {highest[0]} at {highest[1]['probability']:.2f} probability.",
-    ]
+    # ── Compound ──
+    compound = context.get("compound", {})
+    if compound:
+        lines.append(f"Compound SMILES: {compound.get('smiles', 'unknown')}")
+        lines.append(f"Overall danger level: {compound.get('danger_level', 'unknown')}")
+
+    # ── Toxicity summary ──
+    summary = context.get("summary", {})
+    if summary:
+        lines.append(f"\nToxicity Summary:")
+        lines.append(f"  - {summary.get('toxic_count', 0)} of {summary.get('total', 12)} endpoints predicted toxic")
+        lines.append(f"  - {summary.get('safe_count', 0)} endpoints predicted safe")
+        lines.append(f"  - Mean toxicity probability: {summary.get('mean_prob', 0):.2%}")
+        lines.append(f"  - Risk level: {summary.get('risk_level', 'unknown')}")
+
+    # ── Endpoint detail ──
+    toxicity = context.get("toxicity", {})
+    if toxicity:
+        toxic_targets = sorted(
+            [(k, v) for k, v in toxicity.items() if v.get("prediction") == 1],
+            key=lambda x: x[1].get("probability", 0), reverse=True
+        )
+        safe_targets = [(k, v) for k, v in toxicity.items() if v.get("prediction") == 0]
+
+        if toxic_targets:
+            lines.append(f"\nToxic endpoints ({len(toxic_targets)}):")
+            for k, v in toxic_targets:
+                lines.append(f"  - {k}: {v.get('probability', 0):.2%} probability")
+        else:
+            lines.append("\nToxic endpoints: None")
+
+        if safe_targets:
+            lines.append(f"\nSafe endpoints ({len(safe_targets)}):")
+            lines.append(f"  - {', '.join(k for k, _ in safe_targets)}")
+
+    # ── Eco impact ──
+    eco = context.get("eco", {})
+    if eco:
+        biodeg = eco.get("biodegradable", False)
+        soil   = eco.get("soil_impact", 0)
+        water  = eco.get("water_impact", 0)
+        air    = eco.get("air_impact", 0)
+
+        def level(v):
+            return "Low" if v <= 30 else "Moderate" if v <= 60 else "High"
+
+        lines.append(f"\nEco Impact:")
+        lines.append(f"  - Soil impact:  {soil}%  ({level(soil)})  — based on oxidative stress (SR-ARE)")
+        lines.append(f"  - Water impact: {water}% ({level(water)}) — based on mitochondrial toxicity (SR-MMP)")
+        lines.append(f"  - Air impact:   {air}%  ({level(air)})  — based on aryl hydrocarbon receptor (NR-AhR)")
+        lines.append(f"  - Biodegradable: {'Yes' if biodeg else 'No'}")
+        if not biodeg:
+            lines.append("  - This compound is predicted NON-BIODEGRADABLE.")
+            lines.append("  - It may persist in soil and water, potentially accumulating in the food chain.")
+            lines.append("  - Environmental persistence is inferred from high oxidative stress and mitochondrial toxicity scores.")
+
     return "\n".join(lines)
 
 
@@ -67,18 +111,20 @@ def _ask_gemini(message: str, context: dict) -> str:
 
     context_summary = _build_context_summary(context)
 
-    prompt = f"""You are ToxiScan, an expert AI assistant for drug toxicity analysis.
-You help scientists and researchers interpret molecular toxicity predictions.
+    prompt = f"""You are ToxiScan, an expert AI assistant for chemical and drug toxicity analysis.
+You help scientists, researchers, and safety officers understand molecular toxicity predictions.
 
-Current prediction context:
+Current prediction data for this compound:
 {context_summary}
 
-Guidelines:
-- Be concise, clear, and scientifically accurate (2-4 sentences max).
-- If the user asks about safety or risk, refer to the prediction context above.
-- Explain toxicity endpoints in plain English when asked.
-- Do not speculate beyond what the model results show.
-- Never recommend medical or clinical decisions.
+Answer guidelines:
+- Be concise and scientifically accurate (2-4 sentences).
+- For biodegradability questions: use the eco impact section above to explain why it is or isn't biodegradable.
+- For safety/handling questions: give practical advice based on the toxic endpoints.
+- For water/soil/air questions: refer to the eco impact percentages above.
+- For long-term effects: discuss the implications of the triggered endpoints.
+- For "why" questions: explain the molecular reasoning behind the predictions.
+- Do not recommend medical or clinical decisions.
 - If no prediction context exists, ask the user to paste a SMILES string first.
 
 User question: {message}"""
@@ -114,22 +160,28 @@ def get_chatbot_response(message: str, context: dict) -> str:
         print(f"[Gemini error] {e} — falling back to keyword matching")
 
     # Fallback: context-aware response
-    if context and any(w in msg for w in [
+    toxicity = context.get("toxicity", context)
+    if toxicity and any(w in msg for w in [
         "result", "explain", "what", "mean", "score", "why", "show",
-        "safe", "toxic", "risk", "dangerous", "harm", "compound"
+        "safe", "toxic", "risk", "dangerous", "harm", "compound",
+        "biodeg", "water", "soil", "air", "eco", "safety", "handle",
+        "effect", "long", "term", "environment", "persist"
     ]):
-        toxic_targets = [k for k, v in context.items() if v.get("prediction") == 1]
-        safe_targets  = [k for k, v in context.items() if v.get("prediction") == 0]
-        highest       = max(context.items(), key=lambda x: x[1].get("probability", 0))
+        toxic_targets = [k for k, v in toxicity.items() if isinstance(v, dict) and v.get("prediction") == 1]
+        safe_targets  = [k for k, v in toxicity.items() if isinstance(v, dict) and v.get("prediction") == 0]
 
         if toxic_targets:
+            highest = max(
+                ((k, v) for k, v in toxicity.items() if isinstance(v, dict)),
+                key=lambda x: x[1].get("probability", 0)
+            )
             return (
                 f"The compound shows predicted toxicity in {len(toxic_targets)} of 12 endpoints: "
                 f"{', '.join(toxic_targets)}. "
                 f"Highest risk: {highest[0]} at {highest[1]['probability']:.2f} probability. "
                 f"Safe across: {', '.join(safe_targets[:3])}{'...' if len(safe_targets) > 3 else ''}."
             )
-        return "Great news! The compound is predicted safe across all 12 toxicity endpoints."
+        return "The compound is predicted safe across all 12 toxicity endpoints."
 
     # Fallback: plain keyword match
     reply = _keyword_response(msg)

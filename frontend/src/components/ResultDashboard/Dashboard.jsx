@@ -6,9 +6,6 @@ import Explaination from "./Explaination";
 import ChatInterface from "./ChatInterface";
 import "./Dashboard.css";
 
-// ── Convert backend results → what your existing components expect ────────────
-
-// ToxicityBar expects: score 0–100, label string
 function getToxicityProps(summary) {
   const score = Math.round((summary?.mean_prob || 0) * 100);
   const risk  = score <= 25 ? "Low" : score <= 50 ? "Moderate"
@@ -19,28 +16,24 @@ function getToxicityProps(summary) {
   };
 }
 
-// DangerBadge expects: level "safe"|"low"|"moderate"|"high"|"critical"
 function getDangerLevel(toxicCount) {
-  if (toxicCount === 0)      return "safe";
-  if (toxicCount <= 2)       return "low";
-  if (toxicCount <= 5)       return "moderate";
-  if (toxicCount <= 9)       return "high";
+  if (toxicCount === 0)  return "safe";
+  if (toxicCount <= 2)   return "low";
+  if (toxicCount <= 5)   return "moderate";
+  if (toxicCount <= 9)   return "high";
   return "critical";
 }
 
-// EcoCard expects: soil, water, air (0–100), biodegradable bool
-// Map our eco-relevant endpoints to those 3 visual slots
 function getEcoProps(results) {
   if (!results) return { soil: 0, water: 0, air: 0, biodegradable: false };
   const pct = (key) => Math.round((results[key]?.probability || 0) * 100);
-  const soil  = pct("SR-ARE");          // oxidative stress → soil proxy
-  const water = pct("SR-MMP");          // mitochondrial → water toxicity proxy
-  const air   = pct("NR-AhR");          // aryl hydrocarbon → air/volatile proxy
+  const soil  = pct("SR-ARE");
+  const water = pct("SR-MMP");
+  const air   = pct("NR-AhR");
   const biodegradable = (soil + water + air) / 3 < 40;
   return { soil, water, air, biodegradable };
 }
 
-// Explaination expects: compound, explanation string, highlights array
 function getExplanationProps(smiles, results, summary) {
   if (!results) return { compound: smiles, explanation: "", highlights: [] };
 
@@ -83,7 +76,6 @@ function getExplanationProps(smiles, results, summary) {
 }
 
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -93,7 +85,6 @@ export default function Dashboard() {
   const results = apiData?.results         || null;
   const summary = apiData?.summary         || null;
 
-  // If someone navigates directly to /results with no data
   if (!apiData) {
     navigate("/");
     return null;
@@ -103,6 +94,31 @@ export default function Dashboard() {
   const dangerLevel      = getDangerLevel(summary?.toxic_count || 0);
   const ecoProps         = getEcoProps(results);
   const explanationProps = getExplanationProps(smiles, results, summary);
+
+  // ── Rich context for Gemini chatbot ────────────────────────────────────────
+  const chatContext = {
+    toxicity: results,
+    summary: {
+      toxic_count: summary?.toxic_count || 0,
+      safe_count:  summary?.safe_count  || 0,
+      mean_prob:   summary?.mean_prob   || 0,
+      total:       summary?.total       || 12,
+      risk_level:  toxicityProps.label,
+    },
+    eco: {
+      soil_impact:   ecoProps.soil,
+      water_impact:  ecoProps.water,
+      air_impact:    ecoProps.air,
+      biodegradable: ecoProps.biodegradable,
+      soil_source:   "SR-ARE (oxidative stress proxy)",
+      water_source:  "SR-MMP (mitochondrial toxicity proxy)",
+      air_source:    "NR-AhR (aryl hydrocarbon receptor proxy)",
+    },
+    compound: {
+      smiles,
+      danger_level: dangerLevel,
+    },
+  };
 
   return (
     <div className="db-root">
@@ -139,8 +155,8 @@ export default function Dashboard() {
         </div>
 
         <div className="db-right">
-          {/* Pass raw results as context so chatbot gives smart answers */}
-          <ChatInterface compound={smiles} context={results} />
+          {/* ✅ passing full chatContext including eco + biodegradability */}
+          <ChatInterface compound={smiles} context={chatContext} />
         </div>
       </main>
 
