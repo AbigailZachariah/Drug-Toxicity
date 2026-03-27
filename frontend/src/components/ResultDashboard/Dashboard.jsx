@@ -7,7 +7,8 @@ import ChatInterface from "./ChatInterface";
 import "./Dashboard.css";
 
 function getToxicityProps(summary) {
-  const score = Math.round((summary?.mean_prob || 0) * 100);
+  // ✅ FIXED: Use summary.score from API instead of recalculating from mean_prob
+  const score = summary?.score ?? Math.round((summary?.mean_prob || 0) * 100);
   const risk  = score <= 25 ? "Low" : score <= 50 ? "Moderate"
               : score <= 70 ? "High" : score <= 85 ? "Very High" : "Critical";
   return {
@@ -16,11 +17,14 @@ function getToxicityProps(summary) {
   };
 }
 
-function getDangerLevel(toxicCount) {
-  if (toxicCount === 0)  return "safe";
-  if (toxicCount <= 2)   return "low";
-  if (toxicCount <= 5)   return "moderate";
-  if (toxicCount <= 9)   return "high";
+function getDangerLevel(summary) {
+  const toxicCount = summary?.toxic_count || 0;
+  const score      = summary?.score       || 0;
+
+  if (toxicCount === 0 && score < 20) return "safe";
+  if (score < 35)                     return "low";
+  if (score < 50)                     return "moderate";
+  if (score < 75)                     return "high";
   return "critical";
 }
 
@@ -37,39 +41,47 @@ function getEcoProps(results) {
 function getExplanationProps(smiles, results, summary) {
   if (!results) return { compound: smiles, explanation: "", highlights: [] };
 
-  const toxicTargets = Object.entries(results)
-    .filter(([, v]) => v.prediction === 1)
+  // ✅ FIXED: Filter by label "High Risk" or "Moderate", not just prediction === 1
+  const riskyTargets = Object.entries(results)
+    .filter(([, v]) => v.label === "High Risk" || v.label === "Moderate")
     .sort((a, b) => b[1].probability - a[1].probability);
 
-  const safeCount  = summary?.safe_count  || 0;
-  const toxicCount = summary?.toxic_count || 0;
+  const highRiskTargets = riskyTargets.filter(([, v]) => v.label === "High Risk");
 
-  const explanation = toxicCount === 0
-    ? `This compound appears safe across all 12 Tox21 biological endpoints. Mean toxicity probability is ${((summary?.mean_prob||0)*100).toFixed(1)}%, well below the 50% threshold for any endpoint.`
-    : `This compound triggers ${toxicCount} of 12 Tox21 toxicity endpoints. The highest risk is ${toxicTargets[0]?.[0]} at ${((toxicTargets[0]?.[1]?.probability||0)*100).toFixed(0)}% probability. It appears safe across ${safeCount} endpoints.`;
+  const toxicCount = summary?.toxic_count    || 0;
+  const safeCount  = summary?.safe_count     || 0;
+  const score      = summary?.score          || 0;
+  const worst      = summary?.worst_endpoint || riskyTargets[0]?.[0] || "N/A";
+  const worstProb  = results[worst]?.probability || 0;
 
-  const highlights = toxicCount === 0
+  const explanation = toxicCount === 0 && riskyTargets.length === 0
+    ? `This compound appears safe across all 12 Tox21 biological endpoints. Mean toxicity probability is ${((summary?.mean_prob||0)*100).toFixed(1)}%, well below the 30% threshold for any endpoint.`
+    : `This compound triggers ${toxicCount} High Risk endpoint(s) and ${riskyTargets.length - toxicCount} Moderate endpoint(s) out of 12 Tox21 assays. The highest risk is ${worst} at ${(worstProb * 100).toFixed(0)}% probability. Toxicity score: ${score}/100. It appears safe across ${safeCount} endpoints.`;
+
+  const DESCRIPTIONS = {
+    "NR-AR":         "Androgen receptor — hormonal disruption",
+    "NR-AR-LBD":     "Androgen receptor ligand binding",
+    "NR-AhR":        "Aryl hydrocarbon — dioxin-like toxicity",
+    "NR-Aromatase":  "Aromatase enzyme inhibition",
+    "NR-ER":         "Estrogen receptor — endocrine disruption",
+    "NR-ER-LBD":     "Estrogen receptor ligand binding",
+    "NR-PPAR-gamma": "PPAR-gamma — metabolic disruption",
+    "SR-ARE":        "Oxidative stress response",
+    "SR-ATAD5":      "DNA damage / genotoxicity",
+    "SR-HSE":        "Heat shock response",
+    "SR-MMP":        "Mitochondrial membrane — cell death",
+    "SR-p53":        "DNA damage — tumour suppressor",
+  };
+
+  const highlights = riskyTargets.length === 0
     ? [
         "All 12 toxicity endpoints below threshold",
         `Mean risk probability: ${((summary?.mean_prob||0)*100).toFixed(1)}%`,
         "No nuclear receptor or stress pathway activation detected",
       ]
-    : toxicTargets.slice(0, 5).map(([target, v]) => {
-        const desc = {
-          "NR-AR":         "Androgen receptor — hormonal disruption",
-          "NR-AR-LBD":     "Androgen receptor ligand binding",
-          "NR-AhR":        "Aryl hydrocarbon — dioxin-like toxicity",
-          "NR-Aromatase":  "Aromatase enzyme inhibition",
-          "NR-ER":         "Estrogen receptor — endocrine disruption",
-          "NR-ER-LBD":     "Estrogen receptor ligand binding",
-          "NR-PPAR-gamma": "PPAR-gamma — metabolic disruption",
-          "SR-ARE":        "Oxidative stress response",
-          "SR-ATAD5":      "DNA damage / genotoxicity",
-          "SR-HSE":        "Heat shock response",
-          "SR-MMP":        "Mitochondrial membrane — cell death",
-          "SR-p53":        "DNA damage — tumour suppressor",
-        }[target] || target;
-        return `${desc} — ${(v.probability * 100).toFixed(0)}% probability`;
+    : riskyTargets.slice(0, 5).map(([target, v]) => {
+        const desc = DESCRIPTIONS[target] || target;
+        return `${desc} — ${(v.probability * 100).toFixed(0)}% probability [${v.label}]`;
       });
 
   return { compound: smiles, explanation, highlights };
@@ -91,7 +103,7 @@ export default function Dashboard() {
   }
 
   const toxicityProps    = getToxicityProps(summary);
-  const dangerLevel      = getDangerLevel(summary?.toxic_count || 0);
+  const dangerLevel      = getDangerLevel(summary);         // ✅ pass full summary
   const ecoProps         = getEcoProps(results);
   const explanationProps = getExplanationProps(smiles, results, summary);
 
@@ -99,11 +111,15 @@ export default function Dashboard() {
   const chatContext = {
     toxicity: results,
     summary: {
-      toxic_count: summary?.toxic_count || 0,
-      safe_count:  summary?.safe_count  || 0,
-      mean_prob:   summary?.mean_prob   || 0,
-      total:       summary?.total       || 12,
-      risk_level:  toxicityProps.label,
+      toxic_count:    summary?.toxic_count    || 0,
+      moderate_count: summary?.moderate_count || 0,
+      safe_count:     summary?.safe_count     || 0,
+      mean_prob:      summary?.mean_prob      || 0,
+      max_prob:       summary?.max_prob       || 0,
+      score:          summary?.score          || 0,
+      worst_endpoint: summary?.worst_endpoint || "",
+      total:          summary?.total          || 12,
+      risk_level:     toxicityProps.label,
     },
     eco: {
       soil_impact:   ecoProps.soil,
@@ -155,7 +171,6 @@ export default function Dashboard() {
         </div>
 
         <div className="db-right">
-          {/* ✅ passing full chatContext including eco + biodegradability */}
           <ChatInterface compound={smiles} context={chatContext} />
         </div>
       </main>

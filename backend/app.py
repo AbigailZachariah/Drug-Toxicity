@@ -5,12 +5,12 @@ from utils.chatbot import get_chatbot_response
 import pickle, os, numpy as np
 from dotenv import load_dotenv
 load_dotenv()
-import os
 
 app = Flask(__name__)
 CORS(app)
 
 print("KEY LOADED:", os.getenv("GEMINI_API_KEY"))
+
 # ── Load models once at startup ──────────────────────────────────────────────
 BASE = os.path.dirname(__file__)
 with open(f"{BASE}/model/rf_models.pkl",   "rb") as f: MODELS      = pickle.load(f)
@@ -19,18 +19,18 @@ with open(f"{BASE}/model/target_cols.pkl", "rb") as f: TARGET_COLS = pickle.load
 print(f"✅ Loaded {len(TARGET_COLS)} models: {TARGET_COLS}")
 
 TARGET_DESCRIPTIONS = {
-    "NR-AR":          "Androgen receptor — hormonal disruption",
-    "NR-AR-LBD":      "Androgen receptor ligand binding domain",
-    "NR-AhR":         "Aryl hydrocarbon receptor — dioxin-like toxicity",
-    "NR-Aromatase":   "Aromatase enzyme inhibition",
-    "NR-ER":          "Estrogen receptor — endocrine disruption",
-    "NR-ER-LBD":      "Estrogen receptor ligand binding domain",
-    "NR-PPAR-gamma":  "PPAR-gamma — metabolic disruption",
-    "SR-ARE":         "Oxidative stress response",
-    "SR-ATAD5":       "DNA damage / genotoxicity",
-    "SR-HSE":         "Heat shock response",
-    "SR-MMP":         "Mitochondrial membrane — cell death",
-    "SR-p53":         "DNA damage pathway — tumour suppressor",
+    "NR-AR":         "Androgen receptor — hormonal disruption",
+    "NR-AR-LBD":     "Androgen receptor ligand binding domain",
+    "NR-AhR":        "Aryl hydrocarbon receptor — dioxin-like toxicity",
+    "NR-Aromatase":  "Aromatase enzyme inhibition",
+    "NR-ER":         "Estrogen receptor — endocrine disruption",
+    "NR-ER-LBD":     "Estrogen receptor ligand binding domain",
+    "NR-PPAR-gamma": "PPAR-gamma — metabolic disruption",
+    "SR-ARE":        "Oxidative stress response",
+    "SR-ATAD5":      "DNA damage / genotoxicity",
+    "SR-HSE":        "Heat shock response",
+    "SR-MMP":        "Mitochondrial membrane — cell death",
+    "SR-p53":        "DNA damage pathway — tumour suppressor",
 }
 
 
@@ -52,25 +52,51 @@ def predict():
 
         for target in TARGET_COLS:
             model = MODELS[target]
-            pred  = int(model.predict(features)[0])
             prob  = round(float(model.predict_proba(features)[0][1]), 4)
+
+            # ✅ FIXED: Use 0.3 threshold instead of default 0.5
+            if prob >= 0.3:
+                label = "High Risk"
+                pred  = 1
+            elif prob >= 0.15:
+                label = "Moderate"
+                pred  = 0
+            else:
+                label = "Low"
+                pred  = 0
+
             results[target] = {
                 "prediction":  pred,
                 "probability": prob,
-                "label":       "Toxic" if pred == 1 else "Safe"
+                "label":       label
             }
 
-        toxic_count = sum(1 for v in results.values() if v["prediction"] == 1)
-        mean_prob   = round(float(np.mean([v["probability"] for v in results.values()])), 4)
+        probs       = [v["probability"] for v in results.values()]
+        max_prob    = max(probs)
+        mean_prob   = round(float(np.mean(probs)), 4)
+        toxic_count = sum(1 for v in results.values() if v["label"] == "High Risk")
+        moderate_count = sum(1 for v in results.values() if v["label"] == "Moderate")
+
+        # ✅ FIXED: Weighted score formula matching notebook
+        score = round((0.6 * max_prob + 0.4 * mean_prob) * 100, 1)
+        if toxic_count > 0:
+            score = max(score, 40.0)
+
+        # Worst endpoint
+        worst = max(results, key=lambda t: results[t]["probability"])
 
         return jsonify({
             "smiles":  smiles,
             "results": results,
             "summary": {
-                "toxic_count": toxic_count,
-                "safe_count":  len(TARGET_COLS) - toxic_count,
-                "mean_prob":   mean_prob,
-                "total":       len(TARGET_COLS)
+                "toxic_count":    toxic_count,
+                "moderate_count": moderate_count,
+                "safe_count":     len(TARGET_COLS) - toxic_count - moderate_count,
+                "mean_prob":      mean_prob,
+                "max_prob":       round(max_prob, 4),
+                "score":          score,
+                "worst_endpoint": worst,
+                "total":          len(TARGET_COLS)
             }
         })
 
