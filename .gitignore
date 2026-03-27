@@ -7,10 +7,19 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Node modules and build folders
 node_modules
 dist
 dist-ssr
 *.local
+
+# Environment files
+.env
+.env.*        # ignore any other env variants like .env.development, .env.production
+
+# Model files
+backend/model/rf_models.pkl
+backend/model/target_cols.pkl
 
 # Editor directories and files
 .vscode/*
@@ -22,12 +31,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-
-# backend
-.venv
-*.pkl
-*.pickle
-*.sav
-*.h5
-*.pt
