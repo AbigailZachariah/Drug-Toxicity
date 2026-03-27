@@ -35,3 +35,6 @@ backend/model/target_cols.pkl
 *.njsproj
 *.sln
 *.sw?
+
+__pycache__/
+*.pyc
