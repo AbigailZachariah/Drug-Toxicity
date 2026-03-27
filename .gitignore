@@ -38,3 +38,8 @@ backend/model/target_cols.pkl
 
 __pycache__/
 *.pyc
+
+__pycache__/
+*.pyc
+venv/
+.env
