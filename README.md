@@ -160,7 +160,7 @@ Drug-Toxicity/
 ### 1️⃣ Clone Repository
 
 ```bash
-git clone https://github.com/Ar2005ya-12232005a/Drug_Toxicity
+git clone https://github.com/AbigailZachariah/Drug-Toxicity.git
 cd Drug_Toxicity
 ```
 
